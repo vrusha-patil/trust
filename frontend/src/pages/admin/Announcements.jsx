@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FiPlus, FiTrash2, FiBell, FiX, FiCheckCircle, FiClock, FiSend, FiFileText, FiBarChart2, FiUsers, FiMapPin, FiMessageCircle, FiMail, FiSmartphone, FiSearch, FiUser, FiEye } from 'react-icons/fi';
+import { FiPlus, FiTrash2, FiEdit2, FiBell, FiX, FiCheckCircle, FiClock, FiSend, FiFileText, FiBarChart2, FiUsers, FiMapPin, FiMessageCircle, FiMail, FiSmartphone, FiSearch, FiUser, FiEye } from 'react-icons/fi';
 import api from "../../utils/api";
 import { useTableFeatures } from '../../hooks/useTableFeatures';
 import TablePagination from '../../components/TablePagination';
@@ -11,14 +11,27 @@ import { usePermissions } from '../../hooks/usePermissions';
 const Announcements = () => {
   const [activeTab, setActiveTab] = useState('list'); // 'list', 'analytics'
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const { hasManage } = usePermissions('Announcements');
   const [announcements, setAnnouncements] = useState([]);
   const [branches, setBranches] = useState([]);
   const [trustees, setTrustees] = useState([]);
+  const [admins, setAdmins] = useState([]);
+  const [branchManagers, setBranchManagers] = useState([]);
+  const [accountants, setAccountants] = useState([]);
+  const [documentHandlers, setDocumentHandlers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [newlyAddedId, setNewAddedId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [ownershipFilter, setOwnershipFilter] = useState('all'); // 'all', 'mine', 'others'
+  const [expandedIds, setExpandedIds] = useState(new Set());
+
+  const toggleExpand = (id) => {
+    const next = new Set(expandedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setExpandedIds(next);
+  };
 
   const { user } = useAuth();
 
@@ -52,7 +65,6 @@ const Announcements = () => {
     targetBranches: [],
     targetRoles: [],
     targetUsers: [],
-    displayLocations: ['Website Home Page'],
     status: 'Published',
     publishDate: new Date().toISOString().split('T')[0],
     expiryDate: '',
@@ -62,10 +74,36 @@ const Announcements = () => {
     dashboardNotification: true,
   });
 
+  // New Audience State
+  const [audienceSettings, setAudienceSettings] = useState({
+    allAdmins: false,
+    specificAdmins: [],
+    allTrustees: false,
+    specificTrustees: [],
+    allBranchManagers: false,
+    specificBranchManagers: [],
+    allAccountants: false,
+    specificAccountants: [],
+    allDocHandlers: false,
+    specificDocHandlers: [],
+    allDevotees: false
+  });
+
+  // Search states for target audiences
+  const [searchAdmins, setSearchAdmins] = useState('');
+  const [searchTr, setSearchTr] = useState('');
+  const [searchBm, setSearchBm] = useState('');
+  const [searchAcc, setSearchAcc] = useState('');
+  const [searchDh, setSearchDh] = useState('');
+
   useEffect(() => {
     fetchAnnouncements();
     fetchBranches();
+    fetchAdmins();
     fetchTrustees();
+    fetchBranchManagers();
+    fetchAccountants();
+    fetchDocHandlers();
   }, []);
 
   const fetchAnnouncements = async () => {
@@ -89,24 +127,71 @@ const Announcements = () => {
     }
   };
 
+  
+  const fetchAdmins = async () => {
+    try {
+      const res = await api.get('/admins/admins-list');
+      setAdmins(res.data.data || []);
+    } catch (err) {}
+  };
+  
   const fetchTrustees = async () => {
     try {
-      const res = await api.get('/trustees');
+      const res = await api.get('/admins/trustees');
       setTrustees(res.data.trustees || res.data.data || []);
     } catch (err) {
       console.error("Failed to fetch trustees", err);
     }
   };
 
+  const fetchBranchManagers = async () => {
+    try {
+      const res = await api.get('/admins/branch-managers');
+      setBranchManagers(res.data.branchManagers || res.data.data || []);
+    } catch (err) {}
+  };
+
+  const fetchAccountants = async () => {
+    try {
+      const res = await api.get('/accountants');
+      setAccountants(res.data.accountants || res.data.data || []);
+    } catch (err) {}
+  };
+
+  const fetchDocHandlers = async () => {
+    try {
+      const res = await api.get('/document-admin');
+      setDocumentHandlers(res.data.data || []);
+    } catch (err) {}
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
       setSubmitting(true);
+      
+      const payload = { ...formData };
+      payload.audienceType = [];
+      payload.targetRoles = [];
+      payload.targetUsers = [
+        ...audienceSettings.specificAdmins,
+        ...audienceSettings.specificTrustees,
+        ...audienceSettings.specificBranchManagers,
+        ...audienceSettings.specificAccountants,
+        ...audienceSettings.specificDocHandlers
+      ];
+
+      if (audienceSettings.allAdmins) payload.targetRoles.push('Admin');
+      if (audienceSettings.allTrustees) payload.audienceType.push('All Trust Members');
+      if (audienceSettings.allBranchManagers) payload.targetRoles.push('BranchManager');
+      if (audienceSettings.allAccountants) payload.targetRoles.push('Accountant');
+      if (audienceSettings.allDocHandlers) payload.targetRoles.push('DocumentAdmin');
+
       let res;
       if (editingId) {
-        res = await api.put(`/announcements/${editingId}`, formData);
+        res = await api.put(`/announcements/${editingId}`, payload);
       } else {
-        res = await api.post('/announcements', formData);
+        res = await api.post('/announcements', payload);
       }
       setIsModalOpen(false);
       setEditingId(null);
@@ -119,7 +204,7 @@ const Announcements = () => {
       }
       
     } catch (err) {
-      alert(`Failed to save announcement. Server said: ${err.response?.data?.message || err.message}`);
+      alert(`Failed to broadcast announcement.\n\nServer said: ${err.response?.data?.message || err.message}`);
     } finally {
       setSubmitting(false);
     }
@@ -127,10 +212,18 @@ const Announcements = () => {
 
   const resetForm = () => {
     setFormData({
-      title: '', subject: '', message: '', priority: 'Normal', audienceType: ['All Users'],
-      targetBranches: [], targetRoles: [], targetUsers: [], displayLocations: ['Website Home Page'], status: 'Published',
+      title: '', subject: '', message: '', priority: 'Normal', audienceType: [],
+      targetBranches: [], targetRoles: [], targetUsers: [], status: 'Published',
       publishDate: new Date().toISOString().split('T')[0], expiryDate: '',
       whatsappIntegration: false, smsIntegration: false, emailIntegration: false, dashboardNotification: true,
+    });
+    setAudienceSettings({
+      allAdmins: false, specificAdmins: [],
+      allTrustees: false, specificTrustees: [],
+      allBranchManagers: false, specificBranchManagers: [],
+      allAccountants: false, specificAccountants: [],
+      allDocHandlers: false, specificDocHandlers: [],
+      allDevotees: false
     });
   };
 
@@ -141,11 +234,10 @@ const Announcements = () => {
       subject: ann.subject || '',
       message: ann.message || '',
       priority: ann.priority || 'Normal',
-      audienceType: ann.audienceType || ['All Users'],
+      audienceType: ann.audienceType || [],
       targetBranches: ann.targetBranches || [],
       targetRoles: ann.targetRoles || [],
       targetUsers: ann.targetUsers || [],
-      displayLocations: ann.displayLocations || ['Website Home Page'],
       status: ann.status || 'Published',
       publishDate: ann.publishDate ? new Date(ann.publishDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
       expiryDate: ann.expiryDate ? new Date(ann.expiryDate).toISOString().split('T')[0] : '',
@@ -154,6 +246,22 @@ const Announcements = () => {
       emailIntegration: ann.emailIntegration || false,
       dashboardNotification: ann.dashboardNotification ?? true,
     });
+    
+    // Reverse map settings
+    const tUsers = ann.targetUsers || [];
+    setAudienceSettings({
+      allAdmins: ann.targetRoles?.includes('Admin') || false,
+      allTrustees: ann.audienceType?.includes('All Trust Members') || false,
+      allBranchManagers: ann.targetRoles?.includes('BranchManager') || false,
+      allAccountants: ann.targetRoles?.includes('Accountant') || false,
+      allDocHandlers: ann.targetRoles?.includes('DocumentAdmin') || false,
+      specificAdmins: admins.filter(a => tUsers.includes(a._id)).map(a => a._id),
+      specificTrustees: trustees.filter(t => tUsers.includes(t._id)).map(t => t._id),
+      specificBranchManagers: branchManagers.filter(b => tUsers.includes(b._id)).map(b => b._id),
+      specificAccountants: accountants.filter(a => tUsers.includes(a._id)).map(a => a._id),
+      specificDocHandlers: documentHandlers.filter(d => tUsers.includes(d._id)).map(d => d._id),
+    });
+    
     setIsModalOpen(true);
   };
 
@@ -174,35 +282,40 @@ const Announcements = () => {
     }
   };
 
-  const toggleBranch = (branchId) => {
-    const current = formData.targetBranches || [];
-    setFormData({
-      ...formData,
-      targetBranches: current.includes(branchId) ? current.filter(id => id !== branchId) : [...current, branchId]
-    });
-  };
-
-  const toggleRole = (role) => {
-    const current = formData.targetRoles || [];
-    setFormData({
-      ...formData,
-      targetRoles: current.includes(role) ? current.filter(r => r !== role) : [...current, role]
-    });
-  };
-
-  const toggleAudienceType = (type) => {
-    const current = formData.audienceType || [];
-    setFormData({
-      ...formData,
-      audienceType: current.includes(type) ? current.filter(t => t !== type) : [...current, type]
-    });
-  };
-
-  const toggleUser = (userId) => {
-    const current = formData.targetUsers || [];
-    setFormData({
-      ...formData,
-      targetUsers: current.includes(userId) ? current.filter(id => id !== userId) : [...current, userId]
+  const handleAudienceToggle = (field, isSpecific = false, id = null) => {
+    setAudienceSettings(prev => {
+      if (!isSpecific) {
+        // Toggling the "All" checkbox
+        const isChecked = !prev[field];
+        return {
+          ...prev,
+          [field]: isChecked,
+          // Clear specific selection if "All" is selected
+          ...(isChecked && field === 'allTrustees' ? { specificTrustees: [] } : {}),
+          ...(isChecked && field === 'allBranchManagers' ? { specificBranchManagers: [] } : {}),
+          ...(isChecked && field === 'allAccountants' ? { specificAccountants: [] } : {}),
+          ...(isChecked && field === 'allDocHandlers' ? { specificDocHandlers: [] } : {})
+        };
+      } else {
+        // Toggling specific individual checkbox
+        const specificArray = prev[field];
+        const isSelected = specificArray.includes(id);
+        const newArray = isSelected ? specificArray.filter(i => i !== id) : [...specificArray, id];
+        
+        // Uncheck the "All" equivalent if we are checking an individual
+        const uncheckAll = {
+          ...(field === 'specificTrustees' ? { allTrustees: false } : {}),
+          ...(field === 'specificBranchManagers' ? { allBranchManagers: false } : {}),
+          ...(field === 'specificAccountants' ? { allAccountants: false } : {}),
+          ...(field === 'specificDocHandlers' ? { allDocHandlers: false } : {})
+        };
+        
+        return {
+          ...prev,
+          [field]: newArray,
+          ...uncheckAll
+        };
+      }
     });
   };
 
@@ -235,7 +348,7 @@ const Announcements = () => {
               className="pl-10 pr-4 py-2 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 w-64 shadow-sm transition-all"
             />
           </div>
-          <button onClick={handleOpenNew} className="flex items-center gap-2 px-6 py-3 bg-blue-900 hover:bg-blue-800 text-white font-bold rounded-xl shadow-lg shadow-indigo-200 transition-all whitespace-nowrap">
+          <button onClick={handleOpenNew} className="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-xl shadow-lg transition-all whitespace-nowrap">
             <FiPlus /> New Announcement
           </button>
         </div>
@@ -244,7 +357,7 @@ const Announcements = () => {
       {/* Tabs */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div className="flex bg-white rounded-xl shadow-sm border border-slate-100 p-1 gap-1 w-full md:w-auto">
-          <button onClick={() => setActiveTab('list')} className={`flex-1 md:flex-none md:px-8 py-2.5 rounded-lg text-sm font-bold transition-all ${activeTab === 'list' ? 'bg-slate-900 text-white shadow' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}>
+          <button onClick={() => setActiveTab('list')} className={`flex-1 md:flex-none md:px-8 py-2.5 rounded-lg text-sm font-bold transition-all ${activeTab === 'list' ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}>
             <FiFileText className="inline mr-2" /> All Broadcasts
           </button>
           <button onClick={() => setActiveTab('analytics')} className={`flex-1 md:flex-none md:px-8 py-2.5 rounded-lg text-sm font-bold transition-all ${activeTab === 'analytics' ? 'bg-indigo-500 text-white shadow' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}>
@@ -277,10 +390,24 @@ const Announcements = () => {
                 {paginatedData.map((ann, index) => {
                   const isHighlighted = newlyAddedId ? ann._id === newlyAddedId : (index === 0 && new Date() - new Date(ann.createdAt) < 60000);
                   
-                  // Priority-based background colors
-                  const priorityBg = ann.priority === 'Urgent' ? 'bg-rose-50/80 border-rose-200' : 
-                                     ann.priority === 'Important' ? 'bg-amber-50/80 border-amber-200' : 
-                                     'bg-white border-slate-100';
+                  // Same background for all to keep a standard clean UI, only left stripe shows priority
+                  const priorityBg = 'bg-white border-slate-100';
+
+                  const timeAgo = (date) => {
+                    if (!date) return '';
+                    const seconds = Math.floor((new Date() - new Date(date)) / 1000);
+                    let interval = seconds / 31536000;
+                    if (interval > 1) return Math.floor(interval) + "y ago";
+                    interval = seconds / 2592000;
+                    if (interval > 1) return Math.floor(interval) + "mo ago";
+                    interval = seconds / 86400;
+                    if (interval > 1) return Math.floor(interval) + "d ago";
+                    interval = seconds / 3600;
+                    if (interval > 1) return Math.floor(interval) + "h ago";
+                    interval = seconds / 60;
+                    if (interval > 1) return Math.floor(interval) + "m ago";
+                    return Math.floor(seconds) + "s ago";
+                  };
 
                   return (
                     <motion.div 
@@ -288,82 +415,82 @@ const Announcements = () => {
                       initial={isHighlighted ? { scale: 0.95, opacity: 0 } : {}}
                       animate={isHighlighted ? { scale: 1, opacity: 1 } : {}}
                       transition={{ duration: 0.4 }}
-                      className={`rounded-2xl border ${isHighlighted ? 'border-saffron-300 shadow-saffron-100 bg-saffron-50/50 ring-2 ring-saffron-400' : priorityBg} p-6 flex flex-col md:flex-row gap-6 shadow-sm hover:shadow-md transition-all relative overflow-hidden group`}
+                      className={`rounded-xl border ${isHighlighted ? 'border-saffron-300 shadow-saffron-100 bg-saffron-50/50 ring-2 ring-saffron-400' : 'bg-white border-slate-200'} p-5 flex flex-col shadow-sm hover:shadow-md transition-all relative group`}
                     >
-                      <div className={`absolute top-0 left-0 bottom-0 w-1.5 ${ann.priority === 'Urgent' ? 'bg-rose-500' : ann.priority === 'Important' ? 'bg-amber-500' : 'bg-blue-500'}`}></div>
-                      
-                      <div className="flex-1 pl-4">
-                        <div className="flex flex-wrap items-center gap-2 mb-3">
-                          {isHighlighted && (
-                            <span className="px-2.5 py-1 text-[10px] font-black uppercase tracking-widest rounded-md bg-saffron-500 text-white shadow-sm animate-pulse">
-                              NEW
-                            </span>
-                          )}
-                          <span className={`px-2.5 py-1 text-[10px] font-black uppercase tracking-widest rounded-md ${
-                            ann.status === 'Published' ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' : 
-                            ann.status === 'Scheduled' ? 'bg-blue-50 text-blue-600 border border-blue-200' : 
-                            'bg-slate-100 text-slate-500 border border-slate-200'
-                          }`}>
-                            {ann.status === 'Published' ? <FiCheckCircle className="inline mr-1" /> : <FiClock className="inline mr-1" />}
-                            {ann.status}
-                          </span>
-                          <span className="px-2.5 py-1 text-[10px] font-bold uppercase rounded-md bg-purple-50 text-purple-700 border border-purple-100">
-                            <FiUsers className="inline mr-1" /> {ann.audienceType}
-                          </span>
-                          <span className="text-xs text-slate-400 font-medium ml-2">{new Date(ann.publishDate).toLocaleDateString()}</span>
-                        </div>
-                        <h3 className="text-xl font-bold text-slate-900 mb-1">{ann.title}</h3>
-                        <p className="text-sm text-slate-500 mb-4 font-medium">{ann.subject || 'No Subject Provided'}</p>
-                        
-                        {/* Display Targeting Summary */}
-                        <div className="flex flex-wrap gap-2 mb-4">
-                          {ann.targetBranches && ann.targetBranches.length > 0 && (
-                            <span className="text-[10px] bg-slate-100 text-slate-700 px-2 py-1 rounded font-bold border border-slate-200">
-                              {ann.targetBranches.length} Branches
-                            </span>
-                          )}
-                          {ann.targetRoles && ann.targetRoles.length > 0 && (
-                            <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-1 rounded font-bold border border-indigo-200">
-                              {ann.targetRoles.length} Roles
-                            </span>
-                          )}
-                          {ann.targetUsers && ann.targetUsers.length > 0 && (
-                            <span className="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-1 rounded font-bold border border-emerald-200">
-                              {ann.targetUsers.length} Users
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="text-sm text-slate-600 whitespace-pre-wrap">{ann.message}</div>
-                        
-                        {/* Channels & Author */}
-                        <div className="flex flex-wrap items-center justify-between gap-4 mt-6 pt-4 border-t border-slate-50">
-                          <div className="flex items-center gap-4">
-                            <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Channels:</span>
-                            <div className="flex gap-2">
-                              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm ${ann.dashboardNotification ? 'bg-blue-50 text-blue-500' : 'bg-gray-50 text-gray-300'}`} title="Dashboard"><FiBell /></div>
-                              
-                              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm ${ann.emailIntegration ? 'bg-indigo-50 text-indigo-500' : 'bg-gray-50 text-gray-300'}`} title="Email"><FiMail /></div>
-                              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm ${ann.smsIntegration ? 'bg-orange-50 text-orange-500' : 'bg-gray-50 text-gray-300'}`} title="SMS"><FiSmartphone /></div>
-                            </div>
-                          </div>
-                          
-                          <div className="flex items-center gap-4">
-                            <div className="flex items-center gap-2 text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-100">
-                              <FiEye /> {ann.totalRead || 0} Reads
-                            </div>
-                            {ann.createdBy && (
-                              <div className="flex items-center gap-2 text-xs font-bold text-slate-500 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
-                                <FiUser className="text-slate-400" /> By Admin
-                              </div>
+                      {/* Author Header */}
+                      <div className="flex justify-between items-start mb-3">
+                        <div className="flex gap-3 items-center">
+                          <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-500 font-bold overflow-hidden border border-slate-200 shrink-0">
+                            {ann.createdBy?.profilePhoto ? (
+                               <img src={`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}${ann.createdBy.profilePhoto}`} className="w-full h-full object-cover" />
+                            ) : (
+                               <img src="/logo.png" className="w-full h-full object-contain p-1.5" />
                             )}
                           </div>
+                          <div>
+                            <h4 className="text-sm font-bold text-slate-900 leading-tight">
+                              {ann.createdBy?.name || 'System Admin'}
+                              {ann.createdBy?.role && <span className="text-slate-500 font-normal ml-1">• {ann.createdBy.role}</span>}
+                            </h4>
+                            <div className="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-1.5">
+                               <span>{timeAgo(ann.publishDate || ann.createdAt)}</span>
+                               •
+                               <span className="flex items-center gap-1"><FiUsers size={10} /> {ann.audienceType}</span>
+                               • 
+                               <span className={`px-1.5 py-0 text-[9px] font-bold uppercase rounded ${ann.priority === 'Urgent' ? 'bg-rose-100 text-rose-700' : ann.priority === 'Important' ? 'bg-amber-100 text-amber-700' : 'bg-blue-50 text-blue-600'}`}>{ann.priority}</span>
+                               
+                               {isHighlighted && <span className="px-1.5 py-0 text-[9px] font-black uppercase tracking-widest rounded bg-saffron-500 text-white shadow-sm animate-pulse ml-1">NEW</span>}
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => handleEdit(ann)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors" title="Edit"><FiEdit2 size={16} /></button>
+                          <button onClick={() => handleDelete(ann._id)} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-full transition-colors" title="Delete"><FiTrash2 size={16} /></button>
                         </div>
                       </div>
-                      
-                      <div className="md:w-32 flex flex-row md:flex-col items-center justify-center border-t md:border-t-0 md:border-l border-slate-100 gap-2 pt-4 md:pt-0">
-                        <button onClick={() => handleEdit(ann)} className="w-full py-2.5 rounded-lg text-sm font-bold text-slate-600 hover:bg-slate-50 transition-colors">Edit</button>
-                        <button onClick={() => handleDelete(ann._id)} className="w-full py-2.5 rounded-lg text-sm font-bold text-rose-500 hover:bg-rose-50 transition-colors">Delete</button>
+
+                      {/* Content Body */}
+                      <div className="pl-1 md:pl-[60px] mb-2">
+                        <h3 className="text-base font-bold text-slate-900 mb-1">{ann.title}</h3>
+                        {ann.subject && <p className="text-sm text-slate-600 font-semibold mb-2">{ann.subject}</p>}
+                        
+                        <div className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed mt-2">
+                          {ann.message}
+                        </div>
+                      </div>
+
+                      {/* Footer Stats & Tags */}
+                      <div className="mt-3 pt-3 pl-1 md:pl-[60px] border-t border-slate-100 flex flex-wrap items-center justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                          <div className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5 bg-slate-50 px-2 py-1 rounded-md border border-slate-100">
+                            <FiEye /> {ann.totalRead || 0} views
+                          </div>
+                          <div className={`text-[10px] font-bold uppercase px-2 py-1 rounded-md border flex items-center gap-1 ${
+                            ann.status === 'Published' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 
+                            ann.status === 'Scheduled' ? 'bg-blue-50 text-blue-600 border-blue-100' : 
+                            'bg-slate-100 text-slate-500 border-slate-200'
+                          }`}>
+                            {ann.status === 'Published' ? <FiCheckCircle size={10} /> : <FiClock size={10} />}
+                            {ann.status}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                           <div className="flex gap-1.5">
+                              {ann.dashboardNotification && <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] bg-slate-100 text-slate-500 hover:bg-blue-50 hover:text-blue-500 transition-colors" title="Dashboard"><FiBell /></div>}
+                              {ann.emailIntegration && <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] bg-slate-100 text-slate-500 hover:bg-indigo-50 hover:text-indigo-500 transition-colors" title="Email"><FiMail /></div>}
+                              {ann.smsIntegration && <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] bg-slate-100 text-slate-500 hover:bg-orange-50 hover:text-orange-500 transition-colors" title="SMS"><FiSmartphone /></div>}
+                           </div>
+                           
+                           {(ann.targetBranches?.length > 0 || ann.targetRoles?.length > 0 || ann.targetUsers?.length > 0) && (
+                              <div className="flex gap-1.5 border-l border-slate-200 pl-3">
+                                {ann.targetBranches?.length > 0 && <span className="text-[10px] font-medium text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded">{ann.targetBranches.length} Branches</span>}
+                                {ann.targetRoles?.length > 0 && <span className="text-[10px] font-medium text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded">{ann.targetRoles.length} Roles</span>}
+                                {ann.targetUsers?.length > 0 && <span className="text-[10px] font-medium text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded">{ann.targetUsers.length} Users</span>}
+                              </div>
+                           )}
+                        </div>
                       </div>
                     </motion.div>
                   )
@@ -431,123 +558,197 @@ const Announcements = () => {
               <div className="p-6 overflow-y-auto custom-scrollbar flex-1">
                 <form id="announcementForm" onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                   
-                  {/* Left Column: Content */}
-                  <div className="lg:col-span-2 space-y-5">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-widest">Announcement Title *</label>
-                      <input required type="text" value={formData.title} onChange={(e)=>setFormData({...formData, title: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 font-bold focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all" placeholder="e.g., Upcoming Temple Renovation" />
+                  {/* Left Column: Content & Settings */}
+                  <div className="lg:col-span-2 flex flex-col gap-6">
+                    <div className="space-y-5">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-widest">Announcement Title *</label>
+                        <input required type="text" value={formData.title} onChange={(e)=>setFormData({...formData, title: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 font-bold focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all" placeholder="e.g., Upcoming Temple Renovation" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-widest">Subject (Optional)</label>
+                        <input type="text" value={formData.subject} onChange={(e)=>setFormData({...formData, subject: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-700 focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all" placeholder="Short description for notifications..." />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-widest">Message Content *</label>
+                        <textarea required rows="8" value={formData.message} onChange={(e)=>setFormData({...formData, message: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-700 focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all resize-none" placeholder="Write your full announcement here..." />
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-widest">Subject (Optional)</label>
-                      <input type="text" value={formData.subject} onChange={(e)=>setFormData({...formData, subject: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-700 focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all" placeholder="Short description for notifications..." />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-widest">Message Content *</label>
-                      <textarea required rows="8" value={formData.message} onChange={(e)=>setFormData({...formData, message: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-700 focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all resize-none" placeholder="Write your full announcement here..." />
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                      {/* Priority & Status */}
+                      <div className="space-y-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
+                        <h4 className="font-bold text-slate-900 flex items-center gap-2"><FiClock className="text-indigo-500"/> Publishing</h4>
+                        
+                        <div>
+                          <label className="block text-xs font-bold text-slate-500 mb-2 uppercase">Status</label>
+                          <select value={formData.status} onChange={(e)=>setFormData({...formData, status: e.target.value})} className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-500">
+                            <option value="Draft">Draft</option>
+                            <option value="Scheduled">Scheduled</option>
+                            <option value="Published">Published (Immediate)</option>
+                          </select>
+                        </div>
+
+                        {formData.status === 'Scheduled' && (
+                          <div>
+                            <label className="block text-xs font-bold text-slate-500 mb-2 uppercase">Publish Date</label>
+                            <input type="date" value={formData.publishDate} onChange={(e)=>setFormData({...formData, publishDate: e.target.value})} className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-500" />
+                          </div>
+                        )}
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-500 mb-2 uppercase">Priority</label>
+                          <select value={formData.priority} onChange={(e)=>setFormData({...formData, priority: e.target.value})} className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-500">
+                            <option value="Normal">Normal</option>
+                            <option value="Important">Important</option>
+                            <option value="Urgent">Urgent</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Multichannel Distribution */}
+                      <div className="space-y-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
+                        <h4 className="font-bold text-slate-900 flex items-center gap-2"><FiMessageCircle className="text-emerald-500"/> Channels</h4>
+                        
+                        <div className="space-y-2">
+                          <label className="flex items-center justify-between cursor-pointer p-2.5 bg-white border border-slate-200 rounded-lg hover:border-blue-300 transition-colors">
+                            <span className="flex items-center gap-2 text-xs font-bold text-slate-700"><FiBell className="text-blue-500"/> Dashboard Push</span>
+                            <input type="checkbox" checked={formData.dashboardNotification} onChange={(e)=>setFormData({...formData, dashboardNotification: e.target.checked})} className="w-4 h-4 rounded border-gray-300 text-blue-500 focus:ring-blue-500" />
+                          </label>
+                          
+                          <label className="flex items-center justify-between cursor-pointer p-2.5 bg-white border border-slate-200 rounded-lg hover:border-indigo-300 transition-colors">
+                            <span className="flex items-center gap-2 text-xs font-bold text-slate-700"><FiMail className="text-indigo-500"/> Email</span>
+                            <input type="checkbox" checked={formData.emailIntegration} onChange={(e)=>setFormData({...formData, emailIntegration: e.target.checked})} className="w-4 h-4 rounded border-gray-300 text-indigo-500 focus:ring-indigo-500" />
+                          </label>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
                   {/* Right Column: Settings */}
                   <div className="space-y-6">
-                    {/* Priority & Status */}
-                    <div className="space-y-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
-                      <h4 className="font-bold text-slate-900 flex items-center gap-2"><FiClock className="text-indigo-500"/> Publishing</h4>
-                      
-                      <div>
-                        <label className="block text-xs font-bold text-slate-500 mb-2 uppercase">Status</label>
-                        <select value={formData.status} onChange={(e)=>setFormData({...formData, status: e.target.value})} className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-500">
-                          <option value="Draft">Draft</option>
-                          <option value="Scheduled">Scheduled</option>
-                          <option value="Published">Published (Immediate)</option>
-                          <option value="Expired">Expired</option>
-                        </select>
-                      </div>
-
-                      {formData.status === 'Scheduled' && (
-                        <div>
-                          <label className="block text-xs font-bold text-slate-500 mb-2 uppercase">Publish Date</label>
-                          <input type="date" value={formData.publishDate} onChange={(e)=>setFormData({...formData, publishDate: e.target.value})} className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-500" />
-                        </div>
-                      )}
-
-                      <div>
-                        <label className="block text-xs font-bold text-slate-500 mb-2 uppercase">Priority</label>
-                        <select value={formData.priority} onChange={(e)=>setFormData({...formData, priority: e.target.value})} className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-500">
-                          <option value="Normal">Normal</option>
-                          <option value="Important">Important</option>
-                          <option value="Urgent">Urgent</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    {/* Audience Selection */}
-                    <div className="space-y-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
+                    {/* Audience Selection Redesigned */}
+                    <div className="space-y-4 p-4 bg-slate-50 rounded-xl border border-slate-100 h-full">
                       <h4 className="font-bold text-slate-900 flex items-center gap-2"><FiUsers className="text-saffron-500"/> Audience Targeting</h4>
-                      <p className="text-xs text-slate-500">Select any combination of broader audiences, specific roles, branches, or individual users. The announcement will be sent to anyone who matches <b>any</b> of your selections.</p>
+                      <p className="text-xs text-slate-500">Target specific roles. You can select an entire group or specific members within that group.</p>
                       
-                      <div>
-                        <label className="block text-xs font-bold text-slate-500 mb-2 uppercase">Broad Audiences</label>
-                        <div className="grid grid-cols-2 gap-2">
-                          {['All Users', 'All Devotees', 'All Trust Members', 'All Branches'].map(type => (
-                            <label key={type} className="flex items-center gap-2 cursor-pointer text-sm hover:bg-slate-100 p-2 rounded border border-transparent hover:border-slate-200 transition-colors bg-white shadow-sm">
-                              <input type="checkbox" checked={formData.audienceType?.includes(type)} onChange={() => toggleAudienceType(type)} className="rounded text-saffron-500 focus:ring-saffron-500 w-4 h-4" />
-                              <span className="text-slate-700 font-medium">{type}</span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="pt-2 border-t border-slate-200">
-                        <label className="block text-xs font-bold text-slate-500 mb-2 uppercase">Target Specific Branches</label>
-                        <div className="space-y-2 max-h-32 overflow-y-auto custom-scrollbar p-2 bg-white border border-slate-200 rounded-lg">
-                          {branches.map(b => (
-                            <label key={b._id} className="flex items-center gap-2 cursor-pointer text-sm hover:bg-slate-50 p-1 rounded">
-                              <input type="checkbox" checked={formData.targetBranches.includes(b._id)} onChange={() => toggleBranch(b._id)} className="rounded text-saffron-500 focus:ring-saffron-500" />
-                              <span className="text-slate-700">{b.name} ({b.location})</span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="pt-2 border-t border-slate-200">
-                        <label className="block text-xs font-bold text-slate-500 mb-2 uppercase">Target Specific Roles</label>
-                        <div className="space-y-2 max-h-32 overflow-y-auto custom-scrollbar p-2 bg-white border border-slate-200 rounded-lg">
-                          {availableRoles.map(role => (
-                            <label key={role} className="flex items-center gap-2 cursor-pointer text-sm hover:bg-slate-50 p-1 rounded">
-                              <input type="checkbox" checked={formData.targetRoles.includes(role)} onChange={() => toggleRole(role)} className="rounded text-saffron-500 focus:ring-saffron-500" />
-                              <span className="text-slate-700">{role}</span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="pt-2 border-t border-slate-200">
-                        <label className="block text-xs font-bold text-slate-500 mb-2 uppercase">Target Individual Users</label>
-                        <div className="space-y-2 max-h-32 overflow-y-auto custom-scrollbar p-2 bg-white border border-slate-200 rounded-lg">
-                          {trustees.map(t => (
-                            <label key={t._id} className="flex items-center gap-2 cursor-pointer text-sm hover:bg-slate-50 p-1 rounded">
-                              <input type="checkbox" checked={formData.targetUsers?.includes(t._id)} onChange={() => toggleUser(t._id)} className="rounded text-saffron-500 focus:ring-saffron-500" />
-                              <span className="text-slate-700">{t.name} <span className="text-xs text-slate-400">({t.systemRole})</span></span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Multichannel Distribution */}
-                    <div className="space-y-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
-                      <h4 className="font-bold text-slate-900 flex items-center gap-2"><FiMessageCircle className="text-emerald-500"/> Channels</h4>
-                      
-                      <div className="space-y-2">
-                        <label className="flex items-center justify-between cursor-pointer p-2.5 bg-white border border-slate-200 rounded-lg hover:border-blue-300 transition-colors">
-                          <span className="flex items-center gap-2 text-xs font-bold text-slate-700"><FiBell className="text-blue-500"/> Dashboard Push</span>
-                          <input type="checkbox" checked={formData.dashboardNotification} onChange={(e)=>setFormData({...formData, dashboardNotification: e.target.checked})} className="w-4 h-4 rounded border-gray-300 text-blue-500 focus:ring-blue-500" />
-                        </label>
+                      <div className="space-y-3">
                         
-                        <label className="flex items-center justify-between cursor-pointer p-2.5 bg-white border border-slate-200 rounded-lg hover:border-indigo-300 transition-colors">
-                          <span className="flex items-center gap-2 text-xs font-bold text-slate-700"><FiMail className="text-indigo-500"/> Email</span>
-                          <input type="checkbox" checked={formData.emailIntegration} onChange={(e)=>setFormData({...formData, emailIntegration: e.target.checked})} className="w-4 h-4 rounded border-gray-300 text-indigo-500 focus:ring-indigo-500" />
-                        </label>
+                        {/* Admins */}
+                        <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
+                          <div className="p-3 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-2">
+                            <label className="flex items-center gap-2 cursor-pointer text-sm">
+                              <input type="checkbox" checked={audienceSettings.allAdmins} onChange={() => handleAudienceToggle('allAdmins')} className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4" />
+                              <span className="text-slate-800 font-bold">All Admins</span>
+                            </label>
+                            <div className="relative">
+                              <FiSearch className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 w-3 h-3" />
+                              <input type="text" placeholder="Search specific admin..." value={searchAdmins} onChange={e => setSearchAdmins(e.target.value)} className="pl-7 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-md outline-none focus:border-indigo-500 w-full md:w-48" />
+                            </div>
+                          </div>
+                          <div className="max-h-40 overflow-y-auto custom-scrollbar p-2 grid grid-cols-1 md:grid-cols-2 gap-1 bg-white">
+                            {admins.filter(a => a._id !== user?._id && (a.name || a.email || '').toLowerCase().includes(searchAdmins.toLowerCase())).map(a => (
+                              <label key={a._id} className={`flex items-center gap-2 cursor-pointer text-xs hover:bg-slate-50 p-1.5 rounded ${audienceSettings.specificAdmins.includes(a._id) ? 'bg-indigo-50/50' : ''}`}>
+                                <input type="checkbox" checked={audienceSettings.specificAdmins.includes(a._id)} onChange={() => handleAudienceToggle('specificAdmins', true, a._id)} className="rounded text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5" />
+                                <span className="text-slate-700 truncate">{a.name || a.email} <span className="text-slate-400">({a.role || 'Admin'})</span></span>
+                              </label>
+                            ))}
+                            {admins.length === 0 && <span className="text-xs text-slate-400 p-2">No admins found.</span>}
+                          </div>
+                        </div>
+
+                        {/* Trustees */}
+                        <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
+                          <div className="p-3 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-2">
+                            <label className="flex items-center gap-2 cursor-pointer text-sm">
+                              <input type="checkbox" checked={audienceSettings.allTrustees} onChange={() => handleAudienceToggle('allTrustees')} className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4" />
+                              <span className="text-slate-800 font-bold">All Trustees</span>
+                            </label>
+                            <div className="relative">
+                              <FiSearch className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 w-3 h-3" />
+                              <input type="text" placeholder="Search specific trustee..." value={searchTr} onChange={e => setSearchTr(e.target.value)} className="pl-7 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-md outline-none focus:border-indigo-500 w-full md:w-48" />
+                            </div>
+                          </div>
+                          <div className="max-h-40 overflow-y-auto custom-scrollbar p-2 grid grid-cols-1 md:grid-cols-2 gap-1 bg-white">
+                            {trustees.filter(t => t._id !== user?._id && (t.name || t.email || '').toLowerCase().includes(searchTr.toLowerCase())).map(t => (
+                              <label key={t._id} className={`flex items-center gap-2 cursor-pointer text-xs hover:bg-slate-50 p-1.5 rounded ${audienceSettings.specificTrustees.includes(t._id) ? 'bg-indigo-50/50' : ''}`}>
+                                <input type="checkbox" checked={audienceSettings.specificTrustees.includes(t._id)} onChange={() => handleAudienceToggle('specificTrustees', true, t._id)} className="rounded text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5" />
+                                <span className="text-slate-700 truncate">{t.name || t.email} <span className="text-slate-400">({t.systemRole || 'Trustee'})</span></span>
+                              </label>
+                            ))}
+                            {trustees.length === 0 && <span className="text-xs text-slate-400 p-2">No trustees found.</span>}
+                          </div>
+                        </div>
+
+                        {/* Branch Managers */}
+                        <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
+                          <div className="p-3 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-2">
+                            <label className="flex items-center gap-2 cursor-pointer text-sm">
+                              <input type="checkbox" checked={audienceSettings.allBranchManagers} onChange={() => handleAudienceToggle('allBranchManagers')} className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4" />
+                              <span className="text-slate-800 font-bold">All Branch Managers</span>
+                            </label>
+                            <div className="relative">
+                              <FiSearch className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 w-3 h-3" />
+                              <input type="text" placeholder="Search specific manager..." value={searchBm} onChange={e => setSearchBm(e.target.value)} className="pl-7 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-md outline-none focus:border-indigo-500 w-full md:w-48" />
+                            </div>
+                          </div>
+                          <div className="max-h-40 overflow-y-auto custom-scrollbar p-2 grid grid-cols-1 md:grid-cols-2 gap-1 bg-white">
+                            {branchManagers.filter(b => (b.name || b.email || '').toLowerCase().includes(searchBm.toLowerCase())).map(b => (
+                              <label key={b._id} className={`flex items-center gap-2 cursor-pointer text-xs hover:bg-slate-50 p-1.5 rounded ${audienceSettings.specificBranchManagers.includes(b._id) ? 'bg-indigo-50/50' : ''}`}>
+                                <input type="checkbox" checked={audienceSettings.specificBranchManagers.includes(b._id)} onChange={() => handleAudienceToggle('specificBranchManagers', true, b._id)} className="rounded text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5" />
+                                <span className="text-slate-700 truncate">{b.name || b.email}</span>
+                              </label>
+                            ))}
+                            {branchManagers.length === 0 && <span className="text-xs text-slate-400 p-2">No branch managers found.</span>}
+                          </div>
+                        </div>
+
+                        {/* Accountants */}
+                        <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
+                          <div className="p-3 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-2">
+                            <label className="flex items-center gap-2 cursor-pointer text-sm">
+                              <input type="checkbox" checked={audienceSettings.allAccountants} onChange={() => handleAudienceToggle('allAccountants')} className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4" />
+                              <span className="text-slate-800 font-bold">All Accountants</span>
+                            </label>
+                            <div className="relative">
+                              <FiSearch className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 w-3 h-3" />
+                              <input type="text" placeholder="Search specific accountant..." value={searchAcc} onChange={e => setSearchAcc(e.target.value)} className="pl-7 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-md outline-none focus:border-indigo-500 w-full md:w-48" />
+                            </div>
+                          </div>
+                          <div className="max-h-40 overflow-y-auto custom-scrollbar p-2 grid grid-cols-1 md:grid-cols-2 gap-1 bg-white">
+                            {accountants.filter(a => (a.fullName || a.name || a.email || '').toLowerCase().includes(searchAcc.toLowerCase())).map(a => (
+                              <label key={a._id} className={`flex items-center gap-2 cursor-pointer text-xs hover:bg-slate-50 p-1.5 rounded ${audienceSettings.specificAccountants.includes(a._id) ? 'bg-indigo-50/50' : ''}`}>
+                                <input type="checkbox" checked={audienceSettings.specificAccountants.includes(a._id)} onChange={() => handleAudienceToggle('specificAccountants', true, a._id)} className="rounded text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5" />
+                                <span className="text-slate-700 truncate">{a.fullName || a.name || a.email} <span className="text-slate-400">({a.role || 'Accountant'})</span></span>
+                              </label>
+                            ))}
+                            {accountants.length === 0 && <span className="text-xs text-slate-400 p-2">No accountants found.</span>}
+                          </div>
+                        </div>
+
+                        {/* Document Handlers */}
+                        <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
+                          <div className="p-3 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-2">
+                            <label className="flex items-center gap-2 cursor-pointer text-sm">
+                              <input type="checkbox" checked={audienceSettings.allDocHandlers} onChange={() => handleAudienceToggle('allDocHandlers')} className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4" />
+                              <span className="text-slate-800 font-bold">All Document Handlers</span>
+                            </label>
+                            <div className="relative">
+                              <FiSearch className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 w-3 h-3" />
+                              <input type="text" placeholder="Search specific handler..." value={searchDh} onChange={e => setSearchDh(e.target.value)} className="pl-7 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-md outline-none focus:border-indigo-500 w-full md:w-48" />
+                            </div>
+                          </div>
+                          <div className="max-h-40 overflow-y-auto custom-scrollbar p-2 grid grid-cols-1 md:grid-cols-2 gap-1 bg-white">
+                            {documentHandlers.filter(d => (d.email || '').toLowerCase().includes(searchDh.toLowerCase())).map(d => (
+                              <label key={d._id} className={`flex items-center gap-2 cursor-pointer text-xs hover:bg-slate-50 p-1.5 rounded ${audienceSettings.specificDocHandlers.includes(d._id) ? 'bg-indigo-50/50' : ''}`}>
+                                <input type="checkbox" checked={audienceSettings.specificDocHandlers.includes(d._id)} onChange={() => handleAudienceToggle('specificDocHandlers', true, d._id)} className="rounded text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5" />
+                                <span className="text-slate-700 truncate">{d.email} <span className="text-slate-400">({d.role === 'document_admin' ? 'Document Handler' : (d.role || 'Document Handler')})</span></span>
+                              </label>
+                            ))}
+                            {documentHandlers.length === 0 && <span className="text-xs text-slate-400 p-2">No document handlers found.</span>}
+                          </div>
+                        </div>
+
                       </div>
                     </div>
                   </div>

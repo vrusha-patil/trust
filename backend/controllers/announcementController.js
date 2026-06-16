@@ -5,6 +5,7 @@ const Trustee = require('../models/Trustee');
 const BranchManager = require('../models/BranchManager');
 const Accountant = require('../models/Accountant');
 const DocumentAdmin = require('../models/DocumentAdmin');
+const Devotee = require('../models/Devotee');
 const { sendAnnouncementEmail } = require('../services/mailService');
 
 
@@ -67,24 +68,18 @@ exports.getAllAnnouncements = async (req, res) => {
 exports.createAnnouncement = async (req, res) => {
   try {
     const user = req.user;
-    
-    // Permission checks
     if (user.role === 'BranchManager') {
-      // Branch managers can only target their own branch
       req.body.audienceType = ['Specific Branches'];
       req.body.targetBranches = [user.branchId];
     }
-    
     req.body.createdBy = user._id;
     req.body.createdByModel = user.role;
     
     const announcement = new Announcement(req.body);
     await announcement.save();
     
-    
-    // Integration logic
+    let emailStatus = 'Emails not enabled.';
     if (announcement.emailIntegration) {
-      (async () => {
         try {
           const emails = new Set();
           const addEmails = (docs) => {
@@ -94,14 +89,14 @@ exports.createAnnouncement = async (req, res) => {
           const { audienceType = [], targetBranches = [], targetRoles = [], targetUsers = [] } = announcement;
           
           if (audienceType.includes('All Users')) {
-            addEmails(await User.find({ email: { $exists: true, $ne: '' } }));
+            addEmails(await Devotee.find({ email: { $exists: true, $ne: '' } }));
             addEmails(await Trustee.find({ email: { $exists: true, $ne: '' } }));
             addEmails(await BranchManager.find({ email: { $exists: true, $ne: '' } }));
             addEmails(await Accountant.find({ email: { $exists: true, $ne: '' } }));
             addEmails(await DocumentAdmin.find({ email: { $exists: true, $ne: '' } }));
             addEmails(await Admin.find({ email: { $exists: true, $ne: '' } }));
           } else {
-            if (audienceType.includes('All Devotees')) addEmails(await User.find({ email: { $exists: true, $ne: '' } }));
+            if (audienceType.includes('All Devotees')) addEmails(await Devotee.find({ email: { $exists: true, $ne: '' } }));
             if (audienceType.includes('All Trust Members')) addEmails(await Trustee.find({ email: { $exists: true, $ne: '' } }));
             if (audienceType.includes('All Branches')) addEmails(await BranchManager.find({ email: { $exists: true, $ne: '' } }));
             if (targetBranches && targetBranches.length > 0) addEmails(await BranchManager.find({ branchId: { $in: targetBranches }, email: { $exists: true, $ne: '' } }));
@@ -118,49 +113,94 @@ exports.createAnnouncement = async (req, res) => {
               addEmails(await BranchManager.find({ _id: { $in: targetUsers }, email: { $exists: true, $ne: '' } }));
               addEmails(await Accountant.find({ _id: { $in: targetUsers }, email: { $exists: true, $ne: '' } }));
               addEmails(await DocumentAdmin.find({ _id: { $in: targetUsers }, email: { $exists: true, $ne: '' } }));
-              addEmails(await User.find({ _id: { $in: targetUsers }, email: { $exists: true, $ne: '' } }));
+              addEmails(await Devotee.find({ _id: { $in: targetUsers }, email: { $exists: true, $ne: '' } }));
             }
           }
 
           const emailArray = Array.from(emails);
           if (emailArray.length > 0) {
             console.log(`[Announcement] Sending ${emailArray.length} emails...`);
-            await sendAnnouncementEmail(
-              emailArray,
-              'User', 
-              announcement.title,
-              announcement.message
-            );
+            await sendAnnouncementEmail(emailArray, user.name || 'System Admin', announcement.title, announcement.message);
+            emailStatus = 'Emails dispatched successfully.';
           }
         } catch (err) {
           console.error('[Announcement Email Error]', err);
+          emailStatus = `Email sending failed: ${err.message}`;
         }
-      })();
     }
 
-    
-    res.status(201).json({ success: true, data: announcement });
+    return res.status(201).json({ success: true, emailStatus, data: announcement });
   } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
+    return res.status(400).json({ success: false, message: error.message });
   }
 };
 
 exports.updateAnnouncement = async (req, res) => {
   try {
     const announcement = await Announcement.findById(req.params.id);
-    if (!announcement) return res.status(404).json({ success: false, message: "Announcement not found" });
+    if (!announcement) return res.status(404).json({ success: false, message: 'Announcement not found' });
 
-    // Permissions check
     if (req.user.role !== 'Admin' && String(announcement.createdBy) !== String(req.user._id)) {
-      return res.status(403).json({ success: false, message: "Unauthorized to edit this announcement" });
+      return res.status(403).json({ success: false, message: 'Unauthorized to edit this announcement' });
     }
 
     Object.assign(announcement, req.body);
     await announcement.save();
     
-    res.status(200).json({ success: true, data: announcement });
+    let emailStatus = 'Emails not enabled.';
+    if (announcement.emailIntegration) {
+        try {
+          const emails = new Set();
+          const addEmails = (docs) => {
+            docs.forEach(doc => { if (doc.email) emails.add(doc.email); });
+          };
+
+          const { audienceType = [], targetBranches = [], targetRoles = [], targetUsers = [] } = announcement;
+          
+          if (audienceType.includes('All Users')) {
+            addEmails(await Devotee.find({ email: { $exists: true, $ne: '' } }));
+            addEmails(await Trustee.find({ email: { $exists: true, $ne: '' } }));
+            addEmails(await BranchManager.find({ email: { $exists: true, $ne: '' } }));
+            addEmails(await Accountant.find({ email: { $exists: true, $ne: '' } }));
+            addEmails(await DocumentAdmin.find({ email: { $exists: true, $ne: '' } }));
+            addEmails(await Admin.find({ email: { $exists: true, $ne: '' } }));
+          } else {
+            if (audienceType.includes('All Devotees')) addEmails(await Devotee.find({ email: { $exists: true, $ne: '' } }));
+            if (audienceType.includes('All Trust Members')) addEmails(await Trustee.find({ email: { $exists: true, $ne: '' } }));
+            if (audienceType.includes('All Branches')) addEmails(await BranchManager.find({ email: { $exists: true, $ne: '' } }));
+            if (targetBranches && targetBranches.length > 0) addEmails(await BranchManager.find({ branchId: { $in: targetBranches }, email: { $exists: true, $ne: '' } }));
+            if (targetRoles && targetRoles.length > 0) {
+              addEmails(await Trustee.find({ systemRole: { $in: targetRoles }, email: { $exists: true, $ne: '' } }));
+              if (targetRoles.includes('Admin')) addEmails(await Admin.find({ email: { $exists: true, $ne: '' } }));
+              if (targetRoles.includes('BranchManager')) addEmails(await BranchManager.find({ email: { $exists: true, $ne: '' } }));
+              if (targetRoles.includes('Accountant')) addEmails(await Accountant.find({ email: { $exists: true, $ne: '' } }));
+              if (targetRoles.includes('DocumentAdmin')) addEmails(await DocumentAdmin.find({ email: { $exists: true, $ne: '' } }));
+            }
+            if (targetUsers && targetUsers.length > 0) {
+              addEmails(await Trustee.find({ _id: { $in: targetUsers }, email: { $exists: true, $ne: '' } }));
+              addEmails(await Admin.find({ _id: { $in: targetUsers }, email: { $exists: true, $ne: '' } }));
+              addEmails(await BranchManager.find({ _id: { $in: targetUsers }, email: { $exists: true, $ne: '' } }));
+              addEmails(await Accountant.find({ _id: { $in: targetUsers }, email: { $exists: true, $ne: '' } }));
+              addEmails(await DocumentAdmin.find({ _id: { $in: targetUsers }, email: { $exists: true, $ne: '' } }));
+              addEmails(await Devotee.find({ _id: { $in: targetUsers }, email: { $exists: true, $ne: '' } }));
+            }
+          }
+
+          const emailArray = Array.from(emails);
+          if (emailArray.length > 0) {
+            console.log(`[Announcement] Sending ${emailArray.length} emails...`);
+            await sendAnnouncementEmail(emailArray, req.user?.name || 'System Admin', announcement.title, announcement.message);
+            emailStatus = 'Emails dispatched successfully.';
+          }
+        } catch (err) {
+          console.error('[Announcement Email Error]', err);
+          emailStatus = `Email sending failed: ${err.message}`;
+        }
+    }
+    
+    return res.status(200).json({ success: true, emailStatus, data: announcement });
   } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
+    return res.status(400).json({ success: false, message: error.message });
   }
 };
 

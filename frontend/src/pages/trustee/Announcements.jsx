@@ -24,6 +24,14 @@ const Announcements = () => {
   const [newlyAddedId, setNewAddedId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [ownershipFilter, setOwnershipFilter] = useState('all'); // 'all', 'mine', 'others'
+  const [expandedIds, setExpandedIds] = useState(new Set());
+
+  const toggleExpand = (id) => {
+    const next = new Set(expandedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setExpandedIds(next);
+  };
 
   const { user } = useAuth();
 
@@ -196,7 +204,7 @@ const Announcements = () => {
       }
       
     } catch (err) {
-      alert(`Failed to save announcement. Server said: ${err.response?.data?.message || err.message}`);
+      alert(`Failed to broadcast announcement.\n\nServer said: ${err.response?.data?.message || err.message}`);
     } finally {
       setSubmitting(false);
     }
@@ -340,7 +348,7 @@ const Announcements = () => {
               className="pl-10 pr-4 py-2 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 w-64 shadow-sm transition-all"
             />
           </div>
-          <button onClick={handleOpenNew} className="flex items-center gap-2 px-6 py-3 bg-gray-900 hover:bg-black text-white font-black rounded-xl shadow-lg transition-all whitespace-nowrap">
+          <button onClick={handleOpenNew} className="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-xl shadow-lg transition-all whitespace-nowrap">
             <FiPlus /> New Announcement
           </button>
         </div>
@@ -349,7 +357,7 @@ const Announcements = () => {
       {/* Tabs */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div className="flex bg-white rounded-xl shadow-sm border border-slate-100 p-1 gap-1 w-full md:w-auto">
-          <button onClick={() => setActiveTab('list')} className={`flex-1 md:flex-none md:px-8 py-2.5 rounded-lg text-sm font-bold transition-all ${activeTab === 'list' ? 'bg-slate-900 text-white shadow' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}>
+          <button onClick={() => setActiveTab('list')} className={`flex-1 md:flex-none md:px-8 py-2.5 rounded-lg text-sm font-bold transition-all ${activeTab === 'list' ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}>
             <FiFileText className="inline mr-2" /> All Broadcasts
           </button>
           <button onClick={() => setActiveTab('analytics')} className={`flex-1 md:flex-none md:px-8 py-2.5 rounded-lg text-sm font-bold transition-all ${activeTab === 'analytics' ? 'bg-indigo-500 text-white shadow' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}>
